@@ -75,6 +75,55 @@ class PrismClient(requests.Session):
 
         return logs
 
+    def get_logs_by_group(self, attribute, start, end):
+        url = f'{self.base_url}groups'
+        start = int(datetime.timestamp(start) * 1000000)
+        end = int(datetime.timestamp(end) * 1000000)
+        payload = {
+            'entity_type': 'event',
+            'query_name': f'eb:data-{str(datetime.timestamp(datetime.now())).split(".")[0]}',
+            'group_count': 1,
+            'group_offset': 0,
+            'filter_criteria': f'({attribute}=ge={start};{attribute}=lt={end})',
+            'group_attributes': [],
+            'group_member_sort_attribute': attribute,
+            'group_member_sort_order': 'DESCENDING',
+            'group_member_count': 999,
+            'group_member_offset': 0,
+            'group_member_attributes': [
+                {'attribute': 'title'},
+                {'attribute': 'source_entity_name'},
+                {'attribute': 'classification'},
+                {'attribute': 'cluster'},
+                {'attribute': '_created_timestamp_usecs_'},
+                {'attribute': 'default_message'},
+                {'attribute': 'param_name_list'},
+                {'attribute': 'param_value_list'},
+                {'attribute': 'source_entity_uuid'},
+                {'attribute': 'source_entity_type'},
+                {'attribute': 'operation_type'},
+                {'attribute': 'info'}
+            ],
+        }
+
+        r = self.post(url, json=payload)
+        offset = 0
+        length = 999
+        total = int(r.json()['filtered_entity_count'])
+        log.info(f'Got total of {total} events')
+        if total == 0:
+            return []
+        logs = []
+        for x in range(offset, total, length):
+            payload['group_offset'] = x
+            payload['group_member_offset'] = x
+            r = self.post(url, json=payload)
+            data = r.json().get('group_results', [])[0].get('entity_results', [])
+            log.info(f'Got {len(data)} events')
+            logs.extend(data)
+
+        return logs
+
 
 prism_client = PrismClient()
 timezone = pytz.utc
@@ -180,6 +229,13 @@ def alerts():
     log.info(f'total log entries: {len(logs)}')
     save_json(logs, output_file)
 
+
+@main.command()
+def events():
+    log.info('Getting alerts')
+    logs = prism_client.get_logs_by_group('_created_timestamp_usecs_', start_time, end_time)
+    log.info(f'total log entries: {len(logs)}')
+    save_json(logs, output_file)
 
 if __name__ == '__main__':
     main()
